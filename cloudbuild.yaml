@@ -24,13 +24,13 @@ steps:
   - --source=.
   - --trigger-http
   - --runtime=python37
-  - --timeout=90
+  - --timeout=300
   - --memory=2GB
-  #- --vpc-connector=wfd-serverlessvpc-99
-  - --vpc-connector=mongo-connector
+  - --vpc-connector=wfd-serverlessvpc-99
+  #- --vpc-connector=mongo-connector
   - --egress-settings=all
-  - --service-account=fninvoker@webfinancedirect-dev.iam.gserviceaccount.com
-  # - --set-secrets=/etc/secrets/primary/latest=fninvoker-key:latest
-  # - --set-env-vars=REPORT_BUCKET=wfd-reporting-bkt-99-prd,REP_REPORT_DIR=lender-reports
-  - --set-secrets=/etc/secrets/primary/latest=fninvoker-key-dev:latest
-  - --set-env-vars=REPORT_BUCKET=wfd-reporting-01,REP_REPORT_DIR=lender-reports
+  #- --service-account=fninvoker@webfinancedirect-dev.iam.gserviceaccount.com
+  - --set-secrets=/etc/secrets/primary/latest=fninvoker-key:latest
+  - --set-env-vars=REPORT_BUCKET=wfd-reporting-bkt-99-prd,REPORT_DIR=rep-reports,DATA_PATH=merged_data
+  # - --set-secrets=/etc/secrets/primary/latest=fninvoker-key-dev:latest
+  # - --set-env-vars=REPORT_BUCKET=wfd-reporting-01,REP_REPORT_DIR=lender-reports

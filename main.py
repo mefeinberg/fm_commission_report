@@ -1,225 +1,3 @@
-
-# def move_output_to_cloud_storage(local_path,remote_bucket_name):
-
-#     with open('/etc/secrets/primary/latest') as source:
-#       json_acct_info = json.load(source)
-#       print(f'json_acct_info \n{json_acct_info}')
-#     credentials = service_account.Credentials.from_service_account_info(json_acct_info)
-
-#     gcs_client = storage.Client(project_id,credentials)
-#     bucket = gcs_client.get_bucket(HOME_BUCKET)
-#     # credentials = gcs_client.from_json_keyfile_dict(create_keyfile_dict())
-
-#     blob = bucket.blob(remote_bucket_name)
-#     blob.upload_from_filename(filename=local_path)
-#     try: 
-#       os.remove(local_path)
-#     except:
-#       print(f"{local_path} exists but can't delete...this is a problem")
-
-
-#     signed_url = blob.generate_signed_url(
-#         version="v4",
-#         # This URL is valid for 15 minutes
-#         expiration=datetime.timedelta(days=7),
-#         # Allow GET requests using this URL.
-#         method="GET",
-#     )
-
-#     return signed_url
-
-
-# def merge_dfs_by_dealership(df,df1):
-#   df_new = df.merge(df1, left_on='Dealership', right_on='Dealership',
-#                  how='outer', suffixes=('', '_y')).fillna(0)
-#   df_new.drop(df_new.filter(regex='_y$').columns.tolist(),axis=1, inplace=True)
-#   return df_new
-
-# def get_dealer_applicant_analysis_report(request):
-#   """Responds to any HTTP request.
-#   Args:
-#       request (flask.Request): HTTP request object.
-#   Returns:
-#       The response text or any set of values that can be turned into a
-#       Response object using
-#       `make_response <http://flask.pocoo.org/docs/1.0/api/#flask.Flask.make_response>`.
-
-#   """
-#   global rep_selected
-#   global writer, workbook, header_format, money_fmt, numb_fmt, wrap_fmt, percent_fmt, currency_fmt
-
-#   rep_id = ALL_REPS
-#   rep_first_name = rep_last_name = None
-  
-#   periods = VALID_TIME_PERIODS
-#   period_req = None
-
-#   start_date = datetime.datetime(2021, 7, 1, 12)
-#   end_date = datetime.datetime.utcnow()
-
-#   if request:
-#     request_json = request.get_json(silent=True)
-#     request_args = request.args
-
-#     if request_json and 'first_name' in request_json and 'last_name' in request_json:
-#       rep_first_name = request_json['first_name']
-#       rep_last_name = request_json['last_name']
-#     elif request_json and 'representativeId' in request_json:
-#       rep_id = request_json['representativeId']
-#     elif request_args and 'first_name' in request_args and 'last_name' in request_args:
-#       rep_first_name = request_args['first_name']
-#       rep_last_name = request_args['last_name']
-#     elif request_args and 'representativeId' in request_args:
-#       rep_id = request_args['representativeId']
-
-#     dateRange={}
-   
-
-#     if request_json and 'dateRange' in request_json:
-#       dateRange = request_json['dateRange']
-#     elif request_args and 'dateRange' in request_args:
-#       dateRange = request_args['dateRange']
-
-#     try:
-#       print(f"Start_date json is  : {dateRange['from']}")
-#       start_date = dateRange['from']
-#       start_date = parser.parse(start_date)
-#       #start_date = np.datetime64(start_date)
-#       print(f'Start_date : {start_date}')
-#     except: 
-#       pass
-
-#     try:
-#       end_date = dateRange['to']
-#       end_date = parser.parse(end_date)
-#       #end_date = np.datetime64(end_date)
-#       print(f'end_date : {end_date}')
-#     except: 
-#       pass
-
-#     if request_json and 'timePeriod' in request_json:
-#       period_req = request_json['timePeriod']
-#     elif request_args and 'timePeriod' in request_args:
-#       period_req = request_args['timePeriod']
-    
-#     if period_req:
-#       if type(period_req) == list:
-#         if set(period_req).issubset(VALID_TIME_PERIODS):
-#           periods = period_req
-#         else:
-#           return "Invalid time period" ,404
-#       elif period_req in VALID_TIME_PERIODS:  
-#             periods = list(period_req)
-#       else:
-#           return "Invalid time period", 404
-
-#   db = connect_to_mongo()
-
-#   deal_collection = db['deals_view']
-#   history_collection = db['histories'] 
-#   users_collection = db['users']
-
-#   rep_id_query = None
-
-#   rep_query = { "$and": [ { "createdAt": { "$gte": start_date}} ,{ "createdAt": { "$lte": end_date}}]}
-#   rep_selected = ALL_REPS
-
-#   # if query id is specified query users by that otherwise use the name to find user otherwise use ALL_REPS
-#   if not rep_first_name == None and not rep_last_name == None:
-#     rep_id_query = { "$and": [{"data.info.firstName": { '$regex': rep_first_name, '$options' : 'i'}},
-#                           {"data.info.lastName": { '$regex': rep_last_name, '$options' : 'i'}},
-#                           {'deleted' : False}]}
-
-#     try: 
-#       users_df = get_df_from_mongo(users_collection,rep_id_query)
-#       rep_id = users_df['_id'].values[0]
-#       rep_query = { "$and": [ { 'data.dealership.data.representative._id' : rep_id },{ "createdAt": { "$gte": start_date }} ,
-#                             { "createdAt": { "$lte": end_date }} ]}
-#       rep_selected = f'{rep_first_name}_{rep_last_name}_dealer_report'
-#     except: 
-#       return "Invalid Rep", 404
-
-#   elif not rep_id == ALL_REPS:
-#     rep_id_query = { "$and": [{"_id": ObjectId(rep_id)}, {'deleted' : False } ]} 
-
-#     try:
-#       users_df = get_df_from_mongo(users_collection,rep_id_query)
-#       rep_first_name = users_df['data.info.firstName'].values[0]
-#       rep_last_name = users_df['data.info.lastName'].values[0]
-#       rep_selected = f'{rep_first_name}_{rep_last_name}_dealer_report'
-#     except:
-#       return "Invalid ID", 404
-#     rep_query = { "$and": [ { 'data.dealership.data.representative._id' : ObjectId(rep_id) }, { "createdAt": { "$gte": start_date }} ,
-#                             { "createdAt": { "$lte": end_date }} ]}
-
-#   # create a "good" deals dataframe from blackbird data
-#   df_deals = get_df_from_mongo(deal_collection,rep_query)
-
-#   if (not len(df_deals)):
-#     return f"No deals exist for parameters:{rep_id} {start_date} {end_date}" ,404
-
-#   #feature enginneer booked date
-#   df_deals = feature_engineer_deals(df_deals)
-
-#   df_deals = create_status_update_date(df_deals,history_collection,'approved')
-#   df_deals = create_status_update_date(df_deals,history_collection,'delivered')
-#   df_deals = create_status_update_date(df_deals,history_collection,'signed')
-  
-#   reset_multiIndex = False
-  
-#   df_weekly = None
-
-#   for period in periods:
-#     apps = get_info_by_timeframe(df_deals,apps_dict,period)
-#     approved = get_info_by_timeframe(df_deals,approved_dict,period,False,'createdAt',('Status approved','approved'))
-#     delivered = get_info_by_timeframe(df_deals,delivered_dict,period,False,'createdAt',('Status delivered','delivered'))
-#     signed = get_info_by_timeframe(df_deals,signed_dict,period,False,'createdAt',('Status signed','signed'))
-#     funded = get_info_by_timeframe(df_deals,funded_dict,period,False,'Booked Date',('Booked',1))
-
-#     # moved this into the individual sections e.g. delivered or funded
-#     # aftermarket = get_info_by_timeframe(df_deals,after_dict,period,False,'Booked Date',('Booked',1))
-#     # reserve = get_info_by_timeframe(df_deals,reserve_dict,period,False,'Booked Date',('Booked',1))
-
-#     if reset_multiIndex:
-#       df_period = merge_dfs_by_dealership(apps,delivered)
-#       df_period = merge_dfs_by_dealership(df_period,signed)
-#       df_period = merge_dfs_by_dealership(df_period,funded)
-
-#       # df_period = merge_dfs_by_dealership(df_period,aftermarket)
-#       # df_period = merge_dfs_by_dealership(df_period,reserve)
-#     else:
-#       # df_period = apps.join([approved,delivered,funded,aftermarket,reserve]).fillna(0)
-#       df_period = apps.join([approved,delivered,signed,funded]).fillna(0)
-
-#     #df_period = df_period[ordered_report_columns]
-#     #create_report(df_period,f'{tf_dict[period.upper()]} Report',f'This is the {tf_dict[period.upper()]} information from {start_date} to {end_date}')
-#     df_period['Look to Book'] = ( df_period['Number of Funded Deals Total'].astype(float) /df_period['Number of Apps submitted'].astype(float)) * 100.0 
-#     df_period['Look to Book'].replace([np.inf, -np.inf], np.nan, inplace=True)
-
-#     subtotals_df = create_subtotals(df_period)
-#     create_report_by_num(df_period,f'{tf_dict[period.upper()]} Report',f'This is the {tf_dict[period.upper()]} information from {start_date} to {end_date}')
-#     create_report_by_num(subtotals_df,f'{tf_dict[period.upper()]} SubTotals',f'This is the {tf_dict[period.upper()]} information from {start_date} to {end_date}')
-#     if period == 'W':
-#       df_weekly = df_period
-
-#   create_flash_report(df_weekly,f"{tf_dict['W']}ly Sales Flash",f'This is the {tf_dict[period.upper()]} Sales Flash information from {start_date} to {end_date}')
-
-#   writer.close()
-
-#   utc_now = datetime.datetime.utcnow().isoformat()
-#   filename = f'{REP_REPORT_PATH}/{rep_selected}-applicant-analysis-{utc_now}'
-#   xls_url = move_output_to_cloud_storage(xls_report_path,f'{filename}.xls')
-
-#   link = f"https://storage.cloud.google.com/{HOME_BUCKET}/{filename}"
-#   resp = { "urls" :  [ xls_url]}
-
-#   return json.dumps(resp), 200, {'Content-Type': 'application/json'}
-
-# if __name__ == "__main__":
-#   get_dealer_applicant_analysis_report(None)
-
-# -----------------------------------------------------------
-
 from csv import writer
 from doctest import DocFileSuite
 from xml.etree.ElementInclude import include
@@ -351,7 +129,7 @@ class GeoCode:
       return self.__gmap_client.geocode(address)
 
 
-class DealerDealData:
+class DealData:
 
     def __init__(
         self,
@@ -429,20 +207,24 @@ class DealerDealData:
         signed_url = blob.generate_signed_url(
             version="v4",
             # This URL is valid for 7 days
-            expiration=datetime.timedelta(days=7),
+            expiration = timedelta(days=7),
             # Allow GET requests using this URL.
             method="GET",
         )
 
         return signed_url
 
-    def store_data():
-      utc_now = datetime.datetime.utcnow().isoformat()
-      filename = f'{REP_REPORT_PATH}/{rep_selected}-applicant-analysis-{utc_now}'
-      xls_url = move_output_to_cloud_storage(xls_report_path,f'{filename}.xls')
+    def store_data(self,localfile):
+      utc_now = datetime.utcnow().isoformat()
+      if self.__rep_id == None:
+        rep = 'all'
+      else:
+        rep = self.__rep_id
+      bucket_path = f'{self.__bucket_path}/applicant-analysis-{rep}-{utc_now}'
+      urls = self._move_output_to_cloud_storage(localfile,f'{self.__bucket_path}/maps-{rep}-{utc_now}.html')
 
-      link = f"https://storage.cloud.google.com/{HOME_BUCKET}/{filename}"
-      resp = { "urls" :  [ xls_url]}
+      #link = f"https://storage.cloud.google.com/{HOME_BUCKET}/{filename}"
+      resp = { "urls" :  [ urls]}
 
       return json.dumps(resp), 200, {'Content-Type': 'application/json'}
 # FOLIUM COLORS
@@ -585,21 +367,35 @@ def mark_it(row,group):
   return
 
 def click_iframe(df):
-  fig = plt.subplots(figsize=(7,5)) 
-  gs = gridspec.GridSpec(1, 2, width_ratios=[2, 4],wspace=.25) 
-  ax1 = plt.subplot(gs[0])
-  ax2 = plt.subplot(gs[1])
+  fig = plt.subplots(figsize=(8,6)) 
+  #gs = gridspec.GridSpec(1, 2, width_ratios=[2, 4],wspace=.25) 
+  gs = gridspec.GridSpec(2, 2,wspace=.30,hspace=.30 ) 
+  ax0 = plt.subplot(gs[0])
+  ax1 = plt.subplot(gs[1])
+  ax1.set_xticklabels(ax1.get_xticklabels(),rotation = 45)
+  ax2 = plt.subplot(gs[2])
   ax2.set_xticklabels(ax2.get_xticklabels(),rotation = 45)
+  ax3 = plt.subplot(gs[3])
+  ax3.set_xticklabels(ax3.get_xticklabels(),rotation = 45)
 
-  sns.histplot(df['age'],kde=False,ax=ax1)
-  sns.countplot(data=df,x='AgeGroup',hue='data.info.maritalStatus_Married',ax=ax2)
+  sns.histplot(df['age'],kde=False,ax=ax0)
+  sns.countplot(data=df,x='AgeGroup',hue='data.info.maritalStatus_Married',ax=ax1)
+
+  bins = list(range(400, 900, 50))
+  credit_score_range = pd.cut(df['app_credit_score_0'],bins=bins)
+  sns.countplot(x=credit_score_range,ax=ax2)
+
+  bins = list(range(5000, 100000, 5000))
+  df['price_range'] = pd.cut(df['data.info.price.price'],bins=bins)
+  sns.boxplot(x='price_range', y='app_credit_score_0',data=df,ax=ax3);
+
 
   png='/tmp/plot.png'
   plt.savefig(png)
   encoded = base64.b64encode(open(png, 'rb').read()).decode()
   html = '<img src="data:image/png;base64,{}">'.format
 
-  iframe = IFrame(html(encoded), width=900 ,height=500)
+  iframe = IFrame(html(encoded), width=850 ,height=750)
   return(iframe)
 
 def get_dealer_applicant_analysis_report(request):
@@ -613,12 +409,9 @@ def get_dealer_applicant_analysis_report(request):
 
   """
   # Get Environment Variables
-  # BUCKET = os.environ.get('REPORT_BUCKET','wfd-reporting-01')
-  # DATA_PATH = os.environ.get('DATA_PATH','geocode-data')
-  # PROJECT_ID = os.environ.get('GCP_PROJECT','wfd-reporting')
   BUCKET = os.environ.get('REPORT_BUCKET','.')
-  REP_REPORT_PATH = os.environ.get('REP_REPORT_DIR','rep-reports')
-  DATA_PATH = os.environ.get('DATA_PATH','.')  # this will enable reading csv in local directory
+  REPORT_PATH = os.environ.get('REPORT_DIR','rep-reports')
+  DATA_PATH = os.environ.get('DATA_PATH','.')  # this will enable reading csv in local directory for local testing
   PROJECT_ID = os.environ.get('GCP_PROJECT',None)
   if not PROJECT_ID:
     GSPATH=''
@@ -670,7 +463,7 @@ def get_dealer_applicant_analysis_report(request):
   applicant_info = ApplicantInfo(GSPATH,BUCKET,DATA_PATH,PROJECT_ID)
   applicant_df = applicant_info.feature_engineer_address()
 
-  dealer_info = DealerDealData(rep_requested_id,dealer_id,start_date,end_date,GSPATH,BUCKET,DATA_PATH,PROJECT_ID)
+  dealer_info = DealData(rep_requested_id,dealer_id,start_date,end_date,GSPATH,BUCKET,DATA_PATH,PROJECT_ID)
   dealer_info.feature_engineer_dealer()
   dealer_info.feature_engineer()
 
@@ -707,7 +500,7 @@ def get_dealer_applicant_analysis_report(request):
   for i,rep in enumerate(rep_list):
     r = RepEntity(rep)
     rep_name = r.rep_name()
-    rep_gp = folium.FeatureGroup(f"{rep_name}'s Dealers and Deals")
+    rep_gp = folium.FeatureGroup(f"{rep_name}'s Dealers and Deals",show=False)
     rep_df = dealer_df[dealer_df['data.dealership.data.representativeId'] == rep]
 
     dealers_map.add_child(rep_gp)
@@ -729,12 +522,12 @@ def get_dealer_applicant_analysis_report(request):
 
         print(f'Calling folium.Marker for {dealer_name}')
         if rep_requested_id:
-          dealer_gp = folium.FeatureGroup(f"{dealer_name}'s Deals")
+          dealer_gp = folium.FeatureGroup(f"{dealer_name}'s Deals",show=False)
           folium.Marker([lat, long], popup=popup_string,icon=folium.Icon(color=marker_colors[rep_list.tolist().index(dealer_rep_id)]), tooltip=tooltip).add_to(dealer_gp)
         else:
           folium.Marker([lat, long], popup=popup_string,icon=folium.Icon(color=marker_colors[rep_list.tolist().index(dealer_rep_id)]), tooltip=tooltip).add_to(fg)
 
-        dealer_sub_gp = plugins.FeatureGroupSubGroup(rep_gp,dealer_name) 
+        dealer_sub_gp = plugins.FeatureGroupSubGroup(rep_gp,dealer_name,show=False) 
 
         folium.Marker([lat, long], popup=dealer_popup,icon=folium.Icon(color=marker_colors[rep_list.tolist().index(dealer_rep_id)]), tooltip=tooltip).add_to(rep_gp)
 
@@ -750,14 +543,12 @@ def get_dealer_applicant_analysis_report(request):
 
 
 
-
-
-
   folium.LayerControl().add_to(dealers_map)
   output_file = "/tmp/map.html"
 
   dealers_map.save(output_file)
-  status = webbrowser.open(f'file://{output_file}', new=2)  # open in new tab
-
+  urls = dealer_info.store_data(output_file)
+  #status = webbrowser.open(f'file://{output_file}', new=2)  # open in new tab
+  return  urls
 if __name__ == "__main__":
   get_dealer_applicant_analysis_report(None)
