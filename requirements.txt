@@ -1,0 +1,18 @@
+# Function dependencies, for example:
+# package>=version
+pandas
+pymongo[srv]
+numpy
+matplotlib
+seaborn
+google-cloud-storage
+googlemaps
+gcsfs
+fsspec
+xlsxwriter
+python-pptx
+
+
+geopy
+nominatim
+folium
