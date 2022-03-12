@@ -366,10 +366,11 @@ def mark_it(row,group):
     print("Couldn't mark row")
   return
 
-def click_iframe(df):
-  fig = plt.subplots(figsize=(10,7)) 
+def click_iframe(df_in):
+  df = df_in.copy()
+  fig = plt.subplots(figsize=(10,9)) 
   #gs = gridspec.GridSpec(1, 2, width_ratios=[2, 4],wspace=.25) 
-  gs = gridspec.GridSpec(2, 2,width_ratios=[2, 5],wspace=.75,hspace=.75 ) 
+  gs = gridspec.GridSpec(3, 2,width_ratios=[2, 5],wspace=.75,hspace=1.0) 
 
   ax0 = plt.subplot(gs[0])
   ax0.set_xticks(ax0.get_xticks()) # this seems to be a hack to surpress warnings
@@ -393,23 +394,52 @@ def click_iframe(df):
 
   bins = list(range(10000, 100000, 10000))
   df['price_range'] = pd.cut(df['data.info.price.price'],bins=bins)
-  sns.boxplot(x='price_range', y='app_credit_score_0',hue='data.info.type',data=df,ax=ax1);
+  df.rename(columns={'data.info.type':'Collateral','data.info.maritalStatus_Married':'Marital Status'},inplace=True)
+  sns.boxplot(x='price_range', y='app_credit_score_0',hue='Collateral',data=df,ax=ax1);
 
   sns.histplot(df['age'],kde=False,ax=ax2)
-  print(f"histplot ylimit {ax2.get_ylim()}")
   
   #ax2.set_ybound(lower=2)
 
-  sns.countplot(data=df,x='AgeGroup',hue='data.info.maritalStatus_Married',ax=ax3)
+
+  sns.countplot(data=df,x='AgeGroup',hue='Marital Status',ax=ax3)
   #ax3.set_ybound(lower=ax3.get_ylim()+1)
 
+  booked_df =  df[df['Booked'] == 1]
+  apps_submitted = len(df)
+  apps_booked = len(booked_df)
+
+  book_to_look  = f'{(float(apps_booked)/apps_submitted) * 100.0:.2f}%'
+  table_data=[
+    ["Apps Submitted",apps_submitted],
+    ['Funded Apps',apps_booked],
+    ["Book To Look", book_to_look]
+  ]
+
+  #create table
+  ax4 = plt.subplot(gs[4])
+  table = ax4.table(cellText=table_data, loc='center')
+
+  #modify table
+  table.auto_set_font_size(False)
+  table.set_fontsize(6.5)
+  #table.scale(4,1)
+  ax4.axis('off')
+
+  ax5 = plt.subplot(gs[5])
+  ax5.set_xticks(ax5.get_xticks()) # this seems to be a hack to surpress warnings
+  ax5.set_xticklabels(ax5.get_xticklabels(),rotation = 45)
+  
+  sns.countplot(data=df,x=credit_score_range,hue='Booked',ax=ax5)
+
   png='/tmp/plot.png'
+  
   plt.savefig(png)
   plt.close('all') 
   encoded = base64.b64encode(open(png, 'rb').read()).decode()
   html = '<img src="data:image/png;base64,{}">'.format
 
-  iframe = IFrame(html(encoded), width=1000 ,height=775)
+  iframe = IFrame(html(encoded), width=975 ,height=900)
   return(iframe)
 
 def get_dealer_applicant_analysis_report(request):
