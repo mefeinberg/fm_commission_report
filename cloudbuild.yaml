@@ -24,7 +24,7 @@ steps:
   - --source=.
   - --trigger-http
   - --runtime=python37
-  - --timeout=300
+  - --timeout=400
   - --memory=2GB
   - --vpc-connector=wfd-serverlessvpc-99
   #- --vpc-connector=mongo-connector

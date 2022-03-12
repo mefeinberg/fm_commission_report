@@ -349,7 +349,7 @@ def mark_it(row,group):
   dt = row['data.info.payment.dealTotal']
   dealer = row['data.dealership.data.info.name']
   pop_string = f"<ul><li>Collateral: {row['data.info.type']}</li><li>Amount Financed: ${dt:.2f}</li><li>Dealer: {dealer}</li></ul>"
-  pop = folium.Popup(pop_string, min_width=300, max_width=300)
+  pop = folium.Popup(pop_string, min_width=300, max_width=500)
   radius = dt/10000+2
   try:
     if row['BookedLA'] == 1:
@@ -367,35 +367,49 @@ def mark_it(row,group):
   return
 
 def click_iframe(df):
-  fig = plt.subplots(figsize=(8,6)) 
+  fig = plt.subplots(figsize=(10,7)) 
   #gs = gridspec.GridSpec(1, 2, width_ratios=[2, 4],wspace=.25) 
-  gs = gridspec.GridSpec(2, 2,wspace=.30,hspace=.30 ) 
-  ax0 = plt.subplot(gs[0])
-  ax1 = plt.subplot(gs[1])
-  ax1.set_xticklabels(ax1.get_xticklabels(),rotation = 45)
-  ax2 = plt.subplot(gs[2])
-  ax2.set_xticklabels(ax2.get_xticklabels(),rotation = 45)
-  ax3 = plt.subplot(gs[3])
-  ax3.set_xticklabels(ax3.get_xticklabels(),rotation = 45)
+  gs = gridspec.GridSpec(2, 2,width_ratios=[2, 5],wspace=.75,hspace=.75 ) 
 
-  sns.histplot(df['age'],kde=False,ax=ax0)
-  sns.countplot(data=df,x='AgeGroup',hue='data.info.maritalStatus_Married',ax=ax1)
+  ax0 = plt.subplot(gs[0])
+  ax0.set_xticks(ax0.get_xticks()) # this seems to be a hack to surpress warnings
+  ax0.set_xticklabels(ax0.get_xticklabels(),rotation = 45)
+
+  ax1 = plt.subplot(gs[1])
+  ax1.set_xticks(ax1.get_xticks()) # this seems to be a hack to surpress warnings
+  ax1.set_xticklabels(ax1.get_xticklabels(),rotation = 45)
+
+  ax2 = plt.subplot(gs[2])
+  # ax2.set_xticks(ax2.get_xticks()) # this seems to be a hack to surpress warnings
+  # ax2.set_xticklabels(ax2.get_xticklabels(),rotation = 45)
+
+  ax3 = plt.subplot(gs[3])
+  ax3.set_xticks(ax3.get_xticks()) # this seems to be a hack to surpress warnings
+  ax3.set_xticklabels(ax3.get_xticklabels(),rotation = 45)
 
   bins = list(range(400, 900, 50))
   credit_score_range = pd.cut(df['app_credit_score_0'],bins=bins)
-  sns.countplot(x=credit_score_range,ax=ax2)
+  sns.countplot(x=credit_score_range,ax=ax0)
 
-  bins = list(range(5000, 100000, 5000))
+  bins = list(range(10000, 100000, 10000))
   df['price_range'] = pd.cut(df['data.info.price.price'],bins=bins)
-  sns.boxplot(x='price_range', y='app_credit_score_0',data=df,ax=ax3);
+  sns.boxplot(x='price_range', y='app_credit_score_0',hue='data.info.type',data=df,ax=ax1);
 
+  sns.histplot(df['age'],kde=False,ax=ax2)
+  print(f"histplot ylimit {ax2.get_ylim()}")
+  
+  #ax2.set_ybound(lower=2)
+
+  sns.countplot(data=df,x='AgeGroup',hue='data.info.maritalStatus_Married',ax=ax3)
+  #ax3.set_ybound(lower=ax3.get_ylim()+1)
 
   png='/tmp/plot.png'
   plt.savefig(png)
+  plt.close('all') 
   encoded = base64.b64encode(open(png, 'rb').read()).decode()
   html = '<img src="data:image/png;base64,{}">'.format
 
-  iframe = IFrame(html(encoded), width=850 ,height=750)
+  iframe = IFrame(html(encoded), width=1000 ,height=775)
   return(iframe)
 
 def get_dealer_applicant_analysis_report(request):
@@ -504,7 +518,7 @@ def get_dealer_applicant_analysis_report(request):
     rep_df = dealer_df[dealer_df['data.dealership.data.representativeId'] == rep]
 
     dealers_map.add_child(rep_gp)
-    for dealer_name in rep_df['data.dealership.data.info.name'].unique():
+    for dealer_name in sorted(rep_df['data.dealership.data.info.name'].unique()):
       d_df = rep_df[rep_df['data.dealership.data.info.name'] == dealer_name]
       try:
         dealer_addr_location = geocoder.geocode_address(d_df['geocode_address'].values[0])
