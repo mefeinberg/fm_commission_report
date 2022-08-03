@@ -571,11 +571,18 @@ def create_commission_df(df):
   commission_df['Total WFD Income'] = np.where(df['Accounting Box'],  df['data.info.accounting.profit.wfdProfit.totalProfit'],
                                                                            df['data.info.profit.wfdProfit.totalProfit'])
                                                                            
-  commission_df['Commissionable Amount'] = np.where(df['Accounting Box'], df['data.info.accounting.profit.managerProfit.commissionableAmount'],
+  commission_df['Commissionable Amount'] = np.where((df['Accounting Box'] & 
+    df['data.info.accounting.profit.managerProfit.commissionableAmount'].notna()), df['data.info.accounting.profit.managerProfit.commissionableAmount'],
                                                              df['data.info.profit.managerProfit.commissionableAmount'])
-       
-  commission_df['Commission'] = np.where(df['Accounting Box'], df['data.info.accounting.profit.managerProfit.commission'],
+
+                     
+  commission_df['Commission'] = np.where((df['Accounting Box'] & 
+    df['data.info.accounting.profit.managerProfit.commission'].notna()), df['data.info.accounting.profit.managerProfit.commission'],
                                                              df['data.info.profit.managerProfit.commission'])
+            
+  # commission_df['Commission'] = np.where(df['Accounting Box'] &
+  # , df['data.info.accounting.profit.managerProfit.commission'],
+  #                                                            df['data.info.profit.managerProfit.commission'])
        
 
   return commission_df
