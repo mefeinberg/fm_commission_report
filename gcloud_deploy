@@ -1,4 +1,4 @@
 #!/bin/zsh
-zip get_dealer_applicant_analysis.zip main.py requirements.txt
-gcloud builds submit --config cloudbuild.yaml get_dealer_applicant_analysis.zip
-#gcloud functions deploy get_dealer_applicant_analysis_report --vpc-connector mongo-connector --egress-settings=all
+zip fm_commission_report.zip main.py requirements.txt
+gcloud builds submit --config cloudbuild.yaml fm_commission_report.zip
+#gcloud functions deploy get_fm_commission_report --vpc-connector mongo-connector --egress-settings=all

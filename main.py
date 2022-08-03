@@ -1,8 +1,5 @@
 from csv import writer
-from doctest import DocFileSuite
-from xml.etree.ElementInclude import include
-# from sre_constants import SRE_FLAG_MULTILINE
-# from psutil import STATUS_IDLE
+from venv import create
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 import dns
@@ -10,31 +7,19 @@ import pprint
 import datetime
 import pandas as pd
 from enum import Enum
-from datetime import date
-import seaborn as sns
 from google.cloud import storage
 import numpy as np
 import re
 import os
 from dateutil import parser 
 import json
-import time
-import geopy
-from geopy.geocoders import Nominatim
-from geopy.extra.rate_limiter import RateLimiter
-import googlemaps
-from datetime import timedelta, datetime
-import matplotlib.pyplot as plt
+from xlsxwriter.utility import xl_rowcol_to_cell
+from datetime import timedelta, datetime, date
+
 import google.auth.credentials
 from google.oauth2 import service_account
-from matplotlib import gridspec
-import googlemaps
-import folium
-import folium.plugins as plugins
-from branca.element import Template, MacroElement
-import webbrowser
-from folium import IFrame
 import base64
+import time
 
 class RepEntity:
 
@@ -50,8 +35,6 @@ class RepEntity:
     def _connect_to_mongo(self):
         prod_client = MongoClient("mongodb+srv://meftest:A1exander!@webdirectcluster.m2ccb.gcp.mongodb.net/myFirstDatabase?retryWrites=true&w=majority")
         db = prod_client.production
-        #dev_client = MongoClient("mongodb+srv://meftest:A1exander!@cheaptestcluster.m2ccb.mongodb.net/myFirstDatabase?retryWrites=true&w=majority")
-        #db = dev_client.dev
         return db
 
     def _get_rep(self,mongo_collection, query):
@@ -65,121 +48,203 @@ class RepEntity:
     def rep_name(self):
       return self.__rep_name
 
-class ApplicantInfo:
-
-    def __init__(
-        self,
-        gs_path: str,
-        bucket: str,
-        bucket_path: str,
-        project_id:str
-    ):
-        self.__gs_path = gs_path
-        self.__bucket = bucket
-        self.__bucket_path = bucket_path
-        self.__project_id = project_id
-        self.__df =  self._get_existing_df(f'{self.__gs_path}{self.__bucket}/{self.__bucket_path}/applicants_geocode.csv')
-
-    def _get_existing_df(self,bucket_name):
-        try:
-          df = pd.read_csv(bucket_name, encoding='utf-8')
-          # just ensuring there is no ssn
-          try:
-            df = df.drop('data.applicant.data.info.socialSecurityNumber',axis=1)
-          except:
-            pass
-        except:
-          df = pd.DataFrame()
-
-
-        return(df)
-
-
-    def feature_engineer_address(self):
-      # this is becuause there is junk in the data...maybe just <>
-      self.__df = self.__df[(self.__df['data.info.birthDate'] != '1111-11-10T22:26:44.000Z')]
-      self.__df = self.__df[(self.__df['data.info.birthDate'] != '1111-01-01T05:50:36.000Z')]
-      self.__df = self.__df[(self.__df['data.info.birthDate'] != '0200-05-31T05:50:36.000Z')]
-      self.__df = self.__df[(self.__df['data.info.birthDate'] != '1197-07-22T05:50:36.000Z')]
-      self.__df = self.__df[(self.__df['data.info.birthDate'].notna())]
-
-      self.__df['_id'] = self.__df['_id'].apply(ObjectId)
-
-      self.__df['birthDate']= pd.to_datetime(self.__df['data.info.birthDate'],errors='coerce')
-
-      self.__df['age'] = (datetime.utcnow() - self.__df['birthDate'].dt.tz_localize(None)  ) // timedelta(days=365.2425)
-
-      self.__df = pd.get_dummies(self.__df,columns=['data.info.maritalStatus'])
-
-      bins= [17,20,30,40,50,60,70,100]
-      labels = ['Under 20','21-30','31-40','41-50','51-60','61-70','Greater than 70']
-      self.__df['AgeGroup'] = pd.cut(self.__df['age'], bins=bins, labels=labels)
-      return self.__df
-
-class GeoCode:
-
-    def __init__(
-        self,
-    ):
-        self.__geolocator = Nominatim(user_agent="wfd-test")
-        self.__geocode = RateLimiter(self.__geolocator.geocode, min_delay_seconds=5)
-        self.__gmap_client = googlemaps.Client(key='AIzaSyAQQ54vqrH8DexOe7vTv3gONzYRjJo5k5c')
-
-    def geocode_address(self,address):
-      return self.__gmap_client.geocode(address)
-
-
 class DealData:
 
     def __init__(
         self,
-        rep_id: str,
-        dealer_id: str,
-        start_date: datetime,
-        end_date: datetime,
-        gs_path: str,
-        bucket: str,
-        bucket_path: str,
-        project_id:str
+        start_date: datetime=None,
+        end_date: datetime=None,
+        date_type: str='signed',
+        fm_id: str=None,
     ):
-        self.__rep_id = rep_id
-        self.__dealer_id = dealer_id
+        self.__fm_id = fm_id
         self.__start_date = start_date
         self.__end_date = end_date
-        self.__gs_path = gs_path
-        self.__bucket = bucket
-        self.__bucket_path = bucket_path
-        self.__project_id = project_id
-        self.__df =  self._get_existing_df(f'{self.__gs_path}{self.__bucket}/{self.__bucket_path}/df_merge.bz2')
+        self.__df =  pd.DataFrame()
+        self.__mongo_collection = 'deals_view'
+        self.__mongo_query = None
+        self.__db = None
+        self.__date_type = date_type
 
-    def feature_engineer_dealer(self):
-      self.__df['geocode_address'] =  self.__df['data.dealership.data.info.address'] + ' ' + self.__df['data.dealership.data.info.city'] + ' ' + \
-                                      self.__df['data.dealership.data.info.state'] +  self.__df['data.dealership.data.info.zipCode']
-    def feature_engineer(self):
-      bins= [0,10,20,30,40,60,70,80,90,100]
-      labels = ['Under 10k','11-20k','21-30k','31-40k','41-50k','51-60k','61-80k','81-90k','91-100k']
-      self.__df['AmountFinancedBin'],bin_label = pd.cut(self.__df['data.info.payment.dealTotal'], bins=bins, labels=labels, include_lowest=True, retbins=True)
+        if start_date == None:
+          self.__start_date =  datetime(2021, 7, 1, 12)
+        
+        if end_date == None:
+          self.__end_date = datetime.now()
 
-    def _get_existing_df(self,bucket_name):
-        try:
-          df = pd.read_pickle(f'{bucket_name}')
-          if not self.__rep_id == None:
-            if not self.__dealer_id == None:
-              df = df.loc[((df['data.dealership._id'] == ObjectId(self.__dealer_id)) & (df['data.dealership.data.representativeId'] == ObjectId(self.__rep_id))),:]
-            else: 
-              df = df.loc[(df['data.dealership.data.representativeId'] == ObjectId(self.__rep_id)),:]
-          elif not self.__dealer_id == None:
-            df = df.loc[(df['data.dealership._id'] == ObjectId(self.__dealer_id)),:]
-          df = df.loc[((df['createdAt'] >= self.__start_date) & (df['createdAt'] <= self.__end_date)),:]        
-          # just ensuring there is no ssn
+        pd.set_option('display.float_format', lambda x: '%.2f' % x)  # Not sure if this works if you put in a class since it usually global
+        return
+
+    def _connect_to_mongo(self):
+        prod_client = MongoClient("mongodb+srv://meftest:A1exander!@webdirectcluster.m2ccb.gcp.mongodb.net/myFirstDatabase?retryWrites=true&w=majority")
+        db = prod_client.production
+        return db
+
+
+            # self.__mongo_query = { '$or': [
+            #                       { "data.info.statusHistory" : { '$elemMatch': { '$or' : 
+            #                         [
+            #                         {"status": "delivered","date": { '$gte' : self.__start_date.isoformat(), '$lte': self.__end_date.isoformat() } },
+            #                         {"status": "signed","date": { '$gte' : self.__start_date.isoformat(), '$lte': self.__end_date.isoformat() } },
+            #                         {"status": "canceled","date": { '$gte' : self.__start_date.isoformat(), '$lte': self.__end_date.isoformat() } }
+            #                         ] }}
+            #                       },
+            #                       {'data.info.dealDates.fundedAt' : { '$gte' : self.__start_date.isoformat(), '$lte': self.__end_date.isoformat() }}
+            #                     ]}
+    @property
+    def __query(self):
+      if self.__mongo_query == None:
+        if self.__fm_id == None:
+          if self.__date_type == 'signed':
+           self.__mongo_query = { "data.info.statusHistory" : { '$elemMatch': {"status": "signed",
+                                  "$or":  [{'date' : { '$gte' : self.__start_date, '$lte': self.__end_date }},
+                                            {'date':  { '$gte' : self.__start_date.isoformat(), '$lte': self.__end_date.isoformat() }} ] } }} 
+
+          elif self.__date_type == 'delivered':
+            self.__mongo_query = { "data.info.statusHistory" : { '$elemMatch': {"status": "delivered",
+                                  "$or":  [{'date' : { '$gte' : self.__start_date, '$lte': self.__end_date }},
+                                            {'date':  { '$gte' : self.__start_date.isoformat(), '$lte': self.__end_date.isoformat() }} ] } }} 
+
+           
+                          
+        # else:
+        #   self.__mongo_query = { "$and": [{ 'data.user._id' : ObjectId(self.__fm_id) },
+        #                                   { '$or': [
+        #                                             { "data.info.statusHistory" : { '$elemMatch': { '$or' : 
+        #                                               [
+        #                                               {"status": "delivered","date": { '$gte' : self.__start_date.isoformat(), '$lte': self.__end_date.isoformat() } },
+        #                                               {"status": "signed","date": { '$gte' : self.__start_date.isoformat(), '$lte': self.__end_date.isoformat() } },
+        #                                               {"status": "canceled","date": { '$gte' : self.__start_date.isoformat(), '$lte': self.__end_date.isoformat() } }
+        #                                               ] }}
+        #                                             },
+        #                                             {'data.info.dealDates.fundedAt' : { '$gte' : self.__start_date.isoformat(), '$lte': self.__end_date.isoformat() }}
+        #                                           ]}
+
+        #                         ]} 
+                                
+      return self.__mongo_query
+
+    @property 
+    def start_date(self):
+      return self.__start_date
+
+    @property 
+    def end_date(self):
+      return self.__end_date
+
+    @staticmethod
+    def first_date(status_history_list,status='signed',just_date=True):
+
+      first_date_in_history = None
+      num_times = 0
+      date_list = []
+
+      try:
+        first_date_in_history = None
+        for status_history in status_history_list:
           try:
-            df = df.drop('data.applicant.data.info.socialSecurityNumber',axis=1)
+            if status_history['status'] == status:
+              if type(status_history['date']) == str:
+                status_history['date'] =  datetime.strptime(status_history['date'],'%Y-%m-%dT%H:%M:%S.%fZ')
+
+              if first_date_in_history == None:
+                first_date_in_history = status_history['date']
+                num_times += 1
+                date_list.append(first_date_in_history.date())
+              elif first_date_in_history > status_history['date']:
+                first_date_in_history = status_history['date']
+                num_times += 1
+                date_list.append(first_date_in_history.date())
+              else:
+                num_times += 1
+                date_list.append(first_date_in_history.date())
           except:
             pass
-        except:
-          df = pd.DataFrame()
+      except:
+        pass
 
-        return(df)
+      if not first_date_in_history == None:
+        try: 
+          first_date_in_history = first_date_in_history.date()
+        except:
+          if type(first_date_in_history) == str:
+            print(f'Bad history date, date is str {first_date_in_history}, status looked for is {status}')
+            first_date_in_history = datetime.strptime(first_date_in_history,'%Y-%m-%dT%H:%M:%S.%fZ').date()
+
+      if just_date:
+        return first_date_in_history
+      else:
+        return first_date_in_history,num_times,date_list
+
+    def _get_df_from_mongo(self):
+      if not self.__db:
+        self.__db = self._connect_to_mongo()
+        #avgTime: { $avg: ["$maxTime", "$minTime"] } saving for exmple
+        pipeline = [
+            {'$match' : self.__query},
+            {"$unwind": {'path': '$data.data', 'preserveNullAndEmptyArrays': True}},
+            { '$project': { '_id"' : 1, 
+                            'data.info.status': 1, 
+                            'data.info.statusHistory' : 1,
+                            'data.info.type': 1,
+                            'data.info.dealDates.fundedAt' : 1,
+                            'data.dealership.data.info.name': 1, 
+                            'data.dealership.data.representativeId': 1, 
+                            'data.dealership.data.representative.data.info.firstName': 1, 'data.dealership.data.representative.data.info.lastName': 1,
+                            'Representative' : { "$concat" : ['$data.dealership.data.representative.data.info.firstName', ' ', '$data.dealership.data.representative.data.info.lastName']},
+                            'data.user._id' : 1,
+                            'data.user.data.info.firstName' : 1, 'data.user.data.info.lastName' : 1,  
+                            'Finance Manager' : { "$concat" : [ '$data.user.data.info.firstName', ' ', '$data.user.data.info.lastName']},
+                            'data.info.vehicle.VIN' : 1, 
+                            'data.info.vehicle.year' : 1, 'data.info.vehicle.make' : 1, 'data.info.vehicle.model' : 1,
+                            'Vehicle' : { "$concat" : [ { "$toString" : '$data.info.vehicle.year'}, ' ', '$data.info.vehicle.make', ' ', '$data.info.vehicle.model']},
+                            'data.info.refNumber' : 1, 
+                            "data.applicant.data.info.firstName" : 1, "data.applicant.data.info.middleName" : 1, "data.applicant.data.info.lastName" : 1,
+                            "data.lender.data.info.name" : 1, 
+                            'data.info.payment.dealTotal' : 1, #amount financed
+                            # The following is the deal info from the "blue Box"
+                            'data.info.profit.managerProfit.commissionableAmount' : 1,
+                            'data.info.profit.managerProfit.commission' : 1,
+                            'data.info.profit.wfdProfit.reserveCommission' : 1, 'data.info.profit.wfdProfit.extraReserveProfit' : 1, #extrareserveprofit === additional reserve
+                            'data.info.profit.dealershipProfit.reserveCommission' : 1,
+                            "blue_totalReserve" : { "$sum" : ['$data.info.profit.wfdProfit.reserveCommission', '$data.info.profit.totalGAPProfit',
+                                                         '$data.info.profit.totalServiceWarrantyProfit']},
+                            "blue_wfdReserve" : { "$sum" : ['$data.info.profit.wfdProfit.splitFromDeal', '$data.info.profit.wfdProfit.splitTotalFromGap',
+                                                         '$data.info.profit.wfdProfit.splitTotalFromServiceWarranty']},    
+                            'data.info.profit.wfdProfit.extraReserveProfit' : 1, # additional reserve
+                            'data.info.profit.wfdProfit.extraServiceWarrantyProfit' : 1, #Warranty 
+                            'data.info.profit.wfdProfit.extraGAPProfit' : 1, #Gap
+                            'data.info.profit.wfdProfit.totalProfit' : 1,
+                            # The Following is deal info from the green box
+                            'data.info.accounting.profit.managerProfit.commissionableAmount' : 1,
+                            'data.info.accounting.profit.managerProfit.commission' : 1,
+                            'data.info.accounting.profit.wfdProfit.reserveCommission' : 1, 'data.info.accounting.profit.wfdProfit.extraReserveProfit' : 1, #extrareserveprofit === additional reserve
+                            'data.info.accounting.profit.dealershipProfit.reserveCommission' : 1,
+                            "acct_totalReserve" : { "$sum" : ['$data.info.accounting.profit.wfdProfit.reserveCommission', '$data.info.accounting.profit.totalGAPProfit',
+                                                         '$data.info.accounting.profit.totalServiceWarrantyProfit']},
+                            "acct_wfdReserve" : { "$sum" : ['$data.info.accounting.profit.wfdProfit.splitFromDeal', '$data.info.accounting.profit.wfdProfit.splitTotalFromGap',
+                                                         '$data.info.accounting.profit.wfdProfit.splitTotalFromServiceWarranty']}, 
+                            'data.info.accounting.profit.wfdProfit.extraReserveProfit' : 1, # additional reserve
+                            'data.info.accounting.profit.wfdProfit.extraServiceWarrantyProfit' : 1, #Warranty 
+                            'data.info.accounting.profit.wfdProfit.extraGAPProfit' : 1, #Gap
+                            'data.info.accounting.profit.wfdProfit.totalProfit' : 1                           
+                            }},
+      ]
+      query_result = self.__db[self.__mongo_collection].aggregate(pipeline)
+      query_result = list(query_result)
+      df = pd.json_normalize(query_result)
+
+      return df
+
+    @property
+    def df(self):
+      try: 
+        if self.__df.empty:
+          self.__df = self._get_df_from_mongo()
+      except:
+        pass
+
+      return self.__df
 
 
     def get_df(self):
@@ -216,233 +281,307 @@ class DealData:
 
     def store_data(self,localfile):
       utc_now = datetime.utcnow().isoformat()
-      if self.__rep_id == None:
+      if self.__fm_id == None:
         rep = 'all'
       else:
-        rep = self.__rep_id
-      bucket_path = f'{self.__bucket_path}/applicant-analysis-{rep}-{utc_now}'
+        rep = self.__fm_id
+      bucket_path = f'{self.__bucket_path}/commission-analysis-{rep}-{utc_now}'
       urls = self._move_output_to_cloud_storage(localfile,f'{self.__bucket_path}/maps-{rep}-{utc_now}.html')
 
       #link = f"https://storage.cloud.google.com/{HOME_BUCKET}/{filename}"
       resp = { "urls" :  [ urls]}
 
       return json.dumps(resp), 200, {'Content-Type': 'application/json'}
-# FOLIUM COLORS
 
-marker_info = {'denied' : {'color' : 'red', 'radius' : 3,'icon' : 'thumbs-down' },
-              'credit check': {'color' : 'beige', 'radius' : 1.5, 'icon' :'eye-open'},
-              'pending' : {'color' : 'white', 'radius' : 2, 'icon' : 'hourglass'},
-              'counter' : {'color' : 'gray', 'radius' : 2}, 'icon' : 'hand-left',
-              'approved' : {'color' : 'lightblue', 'radius' : 2.5, 'icon' : 'thumbs-up'},
-              'delivered' : {'color' : 'blue', 'radius' : 3.0, 'icon' : 'send'},
-              'signed': {'color' : 'lightgreen', 'radius' : 4.0 , 'icon' : 'pencil' },
-              'booked' : {'color' : 'green', 'radius' : 5.0, 'icon' : 'thumbs-up'},
-              'cancelled' : {'color' : 'darkred', 'radius' : 5.0, 'icon' : 'remove'}
-            }
+    @classmethod
+    def _get_rename_dict(cls,in_dict):
+      return { key: value['name'] for key,value in in_dict.items()}
 
-template = """
-  {% macro html(this, kwargs) %}
+    @classmethod
+    def _get_agg_dict(cls,in_dict):
+      return { key: value['agg'] for key,value in in_dict.items()}
 
-  <!doctype html>
-  <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>jQuery UI Draggable - Default functionality</title>
-    <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    @classmethod
+    def _make_data_grouping(cls,df_grouping,cols,agg_dict,rename_dict):
 
-    <script src="https://code.jquery.com/jquery-1.12.4.js"></script>
-    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
-    
-    <script>
-    $( function() {
-      $( "#maplegend" ).draggable({
-                      start: function (event, ui) {
-                          $(this).css({
-                              right: "auto",
-                              top: "auto",
-                              bottom: "auto"
-                          });
-                      }
-                  });
-  });
+      df = df_grouping[list(cols.keys())].agg(agg_dict)
+      # if reset_multiIndex:
+      #   if isinstance(df.index, pd.MultiIndex):
+      #     df = df.reset_index()
 
-    </script>
-  </head>
-  <body>
-  <div id='maplegend' class='maplegend' 
-      style='position: absolute; z-index:9999; border:2px solid grey; background-color:rgba(255, 255, 255, 0.8);
-      border-radius:6px; padding: 10px; font-size:14px; right: 20px; bottom: 20px;'>
+      df.rename(columns=rename_dict,inplace=True)
+      df.columns = [ (col if type(col) != tuple else " ".join(col)) for col in df.columns.values]
 
-  <div class='legend-title'>Legend</div>
-  <div class='legend-scale'>
-    <ul class='legend-labels'>
-      <li><span style='background:red;opacity:0.7;'></span>Denied</li>
-      <li><span style='background:beige;opacity:0.7;'></span>Credit Check</li>
-      <li><span style='background:white;opacity:0.7;'></span>Pending</li>
-      <li><span style='background:gray;opacity:0.7;'></span>Counter</li>
-      <li><span style='background:lightblue;opacity:0.7;'></span>Approved</li>
-      <li><span style='background:blue;opacity:0.7;'></span>Delivered</li>
-      <li><span style='background:lightgreen;opacity:0.7;'></span>Signed & Sent to Lender</li>
-      <li><span style='background:green;opacity:0.7;'></span>Funded</li>
-      <li><span style='background:darkred;opacity:0.7;'></span>Cancelled</li>
-      <li>Size of circle is proportional to Amount Financed</li>
+      df.columns = df.columns.str.replace("mean", "Avg.")
+      df.columns = df.columns.str.replace("sum", "")
+      df.columns = df.columns.str.replace("list", "")
+      df.columns = df.columns.str.replace("count", "")
+      df.columns = df.columns.str.replace("first", "")
+      df.columns = df.columns.str.replace(" $", "",regex=True)
 
-    </ul>
-  </div>
-  </div>
+      return df
+
+    ''' Public class methods '''
+
+    '''Public Instance methods '''
+    # this function returns a dataframe 
+    # It first does a groupby based on a key and frequency 
+    # It then selects the columns for the dataframe based on a dictionary passed in.  that dictionary has a format that
+    # indicates how to rename the columns and what aggregation functions should be applied, for example, apply sum and np.mean...
+    def get_deals_by_user(self,info_dict,freq='Y',key='createdAt',selector=None):
+
+      if selector == None:  
+        df_gp = self.__df.groupby(['data.user._id','data.info.type',pd.Grouper(key=key,freq=freq)])
+      else:
+        #selector should be a key value concept, such as df['Booked'] == 1 so selector 0 is 'Booked and selector 1 is 1
+        df_gp = self.__df[self.__df[selector[0]] == selector[1]].groupby(['data.user._id','data.info.type',pd.Grouper(key=key,freq=freq)])
+
+
+      #find out what columns we want and how to aggregate them
+      rename_dict = DealData._get_rename_dict(info_dict)
+      aggregate_dict = DealData._get_agg_dict(info_dict)
+
+      apps = DealData._make_data_grouping(df_gp,info_dict,aggregate_dict,rename_dict)
+
+      apps.index.set_names(['Finance Manager Id','Collateral Type',self._tf_dict[freq]],inplace=True)
+
+      return apps
+
+class ExcelSpreadSheet:
+
+    def __init__(
+        self,
+    ):
   
-  </body>
-  </html>
 
-  <style type='text/css'>
-    .maplegend .legend-title {
-      text-align: left;
-      margin-bottom: 5px;
-      font-weight: bold;
-      font-size: 90%;
+        # Add a header format.
+      header = {
+          'bold': True,
+          'text_wrap': True,
+          'valign': 'top',
+          'bg_color': '#78B0DE',
+          'border': 1}
+
+      blue_background = {'bg_color': '#78B0DE'}  # blue cell background color
+      white_background = {'bg_color': '#FFFFFF'} # white cell background color
+
+      self._cell_width = 64.0
+      self._cell_height = 20.0
+      self._bound_width_height = (750, 750)
+      self._xls_text_box_rows = 7
+      self._text_box_options = {
+        'width': 512,
+        'height': 100,
       }
-    .maplegend .legend-scale ul {
-      margin: 0;
-      margin-bottom: 5px;
-      padding: 0;
-      float: left;
-      list-style: none;
-      }
-    .maplegend .legend-scale ul li {
-      font-size: 80%;
-      list-style: none;
-      margin-left: 0;
-      line-height: 18px;
-      margin-bottom: 2px;
-      }
-      
-    .maplegend .legend-scale ul li {
-      font-size: 80%;
-      list-style: none;
-      margin-left: 0;
-      line-height: 18px;
-      margin-bottom: 2px;
-      }
-    .maplegend ul.legend-labels li span {
-      display: block;
-      float: left;
-      height: 16px;
-      width: 30px;
-      margin-right: 5px;
-      margin-left: 0;
-      border: 1px solid #999;
-      }
+      self._text_box_col = 1
+      self._xls_report_path = '/tmp/report.xlsx'
 
-    .maplegend .legend-source {
-      font-size: 80%;
-      color: #777;
-      clear: both;
-      }
-    .maplegend a {
-      color: #777;
-      }
-  </style>
-{% endmacro %}"""
+      self._writer = pd.ExcelWriter(self._xls_report_path, engine='xlsxwriter',date_format = 'mm/dd/yyyy',datetime_format='mm/dd/yyyy ')
+      self._workbook = self._writer.book
+      self._header_fmt = self._workbook.add_format({'bold': True, 'text_wrap': True, 'valign': 'top','align': 'middle'})
 
-def mark_it(row,group):
-  dt = row['data.info.payment.dealTotal']
-  dealer = row['data.dealership.data.info.name']
-  pop_string = f"<ul><li>Collateral: {row['data.info.type']}</li><li>Amount Financed: ${dt:.2f}</li><li>Dealer: {dealer}</li></ul>"
-  pop = folium.Popup(pop_string, min_width=300, max_width=500)
-  radius = dt/10000+2
-  try:
-    if row['BookedLA'] == 1:
-      tip = f"<ul><li>{dealer}'s Customer</li><li>Funded by {row['Lenders']}</li></ul><br>Click for more info"
+      # Add a number format for cells with money.
+      self._money_fmt = self._workbook.add_format({'num_format': '$#,##0'})
+      self._numb_fmt = self._workbook.add_format({'num_format': '#,##0.00','valign': 'top','align': 'middle'})
+      #numb_fmt = workbook.add_format({'bold': True})
+      self._wrap_fmt = self._workbook.add_format({'text_wrap': True,'valign': 'top','align': 'middle'})
+      # Add a percent format with 1 decimal point
+      self._percent_fmt = self._workbook.add_format({'num_format': '0.0%', 'bold': False,'valign': 'top','align': 'middle'})
+      self._currency_fmt = self._workbook.add_format({'num_format': '$#,##0.00','valign': 'top','align': 'middle'})
+      self._blue_background = self._workbook.add_format(blue_background) # blue cell background color
+      self._white_background = self._workbook.add_format(white_background) # white cell background color'
+      self._workbook.add_format(header)
 
-      #tip = f"{dealer}'s Customer<br>Funded by {row['Lenders']}<br> Click for more info"
-      folium.CircleMarker(location=[row["lat"], row["long"]],radius=radius,color=marker_info['booked']['color'],popup=pop,tooltip=tip).add_to(group)
-    else:
-      status = row['data.info.status']
-      tip = f"<ul><li>{dealer}'s Customer</li><li>FStatus: {status}</li></ul><br>Click for more info"
-      #tip = f"{dealer}'s Customer<br>Status: {status}<br>Click for more info"
-      folium.CircleMarker(location=[row["lat"], row["long"]],radius=radius,color=marker_info[status]['color'],popup=pop,tooltip=tip).add_to(group)  
-  except:
-    print("Couldn't mark row")
-  return
+      return
 
-def click_iframe(df_in):
-  df = df_in.copy()
-  fig = plt.subplots(figsize=(10,9)) 
-  #gs = gridspec.GridSpec(1, 2, width_ratios=[2, 4],wspace=.25) 
-  gs = gridspec.GridSpec(3, 2,width_ratios=[2, 5],wspace=.75,hspace=1.0) 
+    # public functions
+    @property
+    def header_fmt(self):
+      return self._header_fmt
 
-  ax0 = plt.subplot(gs[0])
-  ax0.set_xticks(ax0.get_xticks()) # this seems to be a hack to surpress warnings
-  ax0.set_xticklabels(ax0.get_xticklabels(),rotation = 45)
+    @property
+    def money_format(self):
+      return self._money_fmt
 
-  ax1 = plt.subplot(gs[1])
-  ax1.set_xticks(ax1.get_xticks()) # this seems to be a hack to surpress warnings
-  ax1.set_xticklabels(ax1.get_xticklabels(),rotation = 45)
+    @property
+    def number_format(self):
+      return self._numb_fmt
 
-  ax2 = plt.subplot(gs[2])
-  # ax2.set_xticks(ax2.get_xticks()) # this seems to be a hack to surpress warnings
-  # ax2.set_xticklabels(ax2.get_xticklabels(),rotation = 45)
+    @property
+    def wrap_format(self):
+      return self._wrap_fmt
 
-  ax3 = plt.subplot(gs[3])
-  ax3.set_xticks(ax3.get_xticks()) # this seems to be a hack to surpress warnings
-  ax3.set_xticklabels(ax3.get_xticklabels(),rotation = 45)
+    @property
+    def percent_format(self):
+      return self._percent_fmt
 
-  bins = list(range(400, 900, 50))
-  credit_score_range = pd.cut(df['app_credit_score_0'],bins=bins)
-  sns.countplot(x=credit_score_range,ax=ax0)
+    @property
+    def currency_format(self):
+      return self._currency_fmt
 
-  bins = list(range(10000, 100000, 10000))
-  df['price_range'] = pd.cut(df['data.info.price.price'],bins=bins)
-  df.rename(columns={'data.info.type':'Collateral','data.info.maritalStatus_Married':'Marital Status'},inplace=True)
-  sns.boxplot(x='price_range', y='app_credit_score_0',hue='Collateral',data=df,ax=ax1);
+    def write_df_to_excel(self, df, sheet, row,text=None,autoFilter=False,format_columns=None,print_index = False):
 
-  sns.histplot(df['age'],kde=False,ax=ax2)
-  
-  #ax2.set_ybound(lower=2)
+      # Example, the xlswriter interface is a challenge, we can't add_worksheet but rather start by writing out the dataframe and then the text box
+      if text:
+        start_text_box = row
+        start_df_row = start_text_box + self._xls_text_box_rows
+      else:
+        start_df_row = row
+
+      (max_row, max_col) = df.shape
+      max_row = max_row + start_df_row
+
+      #Adding +1 for start row because writing header separately
+      if autoFilter:
+        df.to_excel(self._writer,sheet_name=sheet,startrow=start_df_row+1,float_format="%.2f",merge_cells=True,header=False,index=print_index)
+        self._writer.sheets[sheet].autofilter(start_df_row, 0,df.shape[0] , df.shape[1] - 1)
+      else:
+        df.to_excel(self._writer,sheet_name=sheet,startrow=start_df_row+1,float_format="%.2f",merge_cells=True,header=False,index=print_index)
 
 
-  sns.countplot(data=df,x='AgeGroup',hue='Marital Status',ax=ax3)
-  #ax3.set_ybound(lower=ax3.get_ylim()+1)
 
-  booked_df =  df[df['Booked'] == 1]
-  apps_submitted = len(df)
-  apps_booked = len(booked_df)
+      col_list = []
+      if print_index: 
+        col_list = list(df.index.names) + list(df.columns.values)  
+      else:
+        col_list = list(df.columns.values)  
+      col_num=0
+      # if isinstance(df.index, pd.MultiIndex):
+      #   col_list = list(df.index.names) + list(df.columns.values)
+      #   col_num=0
+      # else: 
+      #   col_list = list(df.columns.values)
+      #   col_num=1
 
-  book_to_look  = f'{(float(apps_booked)/apps_submitted) * 100.0:.2f}%'
-  table_data=[
-    ["Apps Submitted",apps_submitted],
-    ['Funded Apps',apps_booked],
-    ["Book To Look", book_to_look]
-  ]
+      # Write the column headers with the defined format.
+      self._writer.sheets[sheet].freeze_panes(start_df_row+1,0)
+      for col_num, value in enumerate(col_list):
+          self._writer.sheets[sheet].write(start_df_row, col_num, value, self._header_fmt)
+          self._writer.sheets[sheet].set_column(start_df_row,col_num,
+                                                format_columns[col_num]['col_width'], 
+                                                format_columns[col_num]['format'], 
+                                                options={'hidden': format_columns[col_num]['hidden']}) 
+      if text:
+        temp_ws = self._writer.sheets[sheet]
+        temp_ws.insert_textbox(start_text_box , self._text_box_col, text,self._text_box_options)
 
-  #create table
-  ax4 = plt.subplot(gs[4])
-  table = ax4.table(cellText=table_data, loc='center')
+      row += start_df_row + len(df) + 2
 
-  #modify table
-  table.auto_set_font_size(False)
-  table.set_fontsize(6.5)
-  #table.scale(4,1)
-  ax4.axis('off')
+      sum_cols = [5,6,7,10,12,13]
+      self._writer.sheets[sheet].write(max_row+1, 4, 'Totals', self._header_fmt)  
 
-  ax5 = plt.subplot(gs[5])
-  ax5.set_xticks(ax5.get_xticks()) # this seems to be a hack to surpress warnings
-  ax5.set_xticklabels(ax5.get_xticklabels(),rotation = 45)
-  
-  sns.countplot(data=df,x=credit_score_range,hue='Booked',ax=ax5)
+      # for i in range(start_df_row,max_row): # integer odd-even alternation 
+      #     self._writer.sheets[sheet].set_row(i, cell_format=(self._blue_background if i%2==0 else self._white_background))
 
-  png='/tmp/plot.png'
-  
-  plt.savefig(png)
-  plt.close('all') 
-  encoded = base64.b64encode(open(png, 'rb').read()).decode()
-  html = '<img src="data:image/png;base64,{}">'.format
+      #for col in sum_cols:
+      for col, value in enumerate(col_list):
+        try: 
+          if format_columns[col]['total']:
+            s_cell = xl_rowcol_to_cell(start_df_row+1,col) 
+            e_cell = xl_rowcol_to_cell(max_row,col )  
+            formula = f'=SUBTOTAL(109,{s_cell}:{e_cell})'
+            self._writer.sheets[sheet].write_formula(max_row+1, col, formula)
+        except:
+          pass
 
-  iframe = IFrame(html(encoded), width=975 ,height=900)
-  return(iframe)
+      return temp_ws,row
 
-def get_dealer_applicant_analysis_report(request):
+    def close(self):
+      self._writer.close()
+      return
+
+    def _move_output_to_cloud_storage(self,project_id,bucket, remote_path):
+        local_path = self._xls_report_path
+
+        with open('/etc/secrets/primary/latest') as source:
+          json_acct_info = json.load(source)
+          print(f'json_acct_info \n{json_acct_info}')
+        credentials = service_account.Credentials.from_service_account_info(json_acct_info)
+
+        gcs_client = storage.Client(project_id,credentials)
+        bucket = gcs_client.get_bucket(bucket)
+        # credentials = gcs_client.from_json_keyfile_dict(create_keyfile_dict())
+
+        blob = bucket.blob(remote_path)
+        blob.upload_from_filename(filename=local_path)
+        try: 
+          os.remove(local_path)
+        except:
+          print(f"{local_path} exists but can't delete...this is a problem")
+
+
+        signed_url = blob.generate_signed_url(
+            version="v4",
+            # This URL is valid for 7 days
+            expiration = timedelta(days=7),
+            # Allow GET requests using this URL.
+            method="GET",
+        )
+
+        return signed_url
+
+    def store_xls(self,project_id,bucket, report_path,rep=None):
+      utc_now = datetime.utcnow().isoformat()
+
+      remote_path = f'{report_path}/fm-commission-{rep}-{utc_now}.xls'
+      urls = self._move_output_to_cloud_storage(project_id,bucket,remote_path)
+      resp = { "urls" :  [ urls]}
+
+      return json.dumps(resp), 200, {'Content-Type': 'application/json'}
+
+def create_commission_df(df):
+   
+  commission_df =  pd.DataFrame()
+  commission_df['Accounting Box'] = df['Accounting Box']
+
+  commission_df['Additional Reserve - Acct Modified'] = np.where(df['Accounting Box']  & 
+    df['data.info.accounting.profit.wfdProfit.extraReserveProfit'].notna() &
+  (df['data.info.accounting.profit.wfdProfit.extraReserveProfit'] !=  df['data.info.profit.wfdProfit.extraReserveProfit']), True, False)
+                                                                          
+  #deal_df[deal_df['Accounting Box'] & (deal_df['data.info.accounting.profit.wfdProfit.totalProfit'] != deal_df['data.info.profit.wfdProfit.totalProfit'])]['data.info.refNumber']
+
+  commission_df['GAP - Acct Modified'] = np.where(df['Accounting Box'] & df['data.info.accounting.profit.wfdProfit.extraGAPProfit'].notna() &
+    (df['data.info.accounting.profit.wfdProfit.extraGAPProfit'] != df['data.info.profit.wfdProfit.extraGAPProfit']), True, False)
+                                                                            
+
+  commission_df['Warranty - Acct Modified'] = np.where(df['Accounting Box'] &
+      df['data.info.accounting.profit.wfdProfit.extraServiceWarrantyProfit'].notna() &
+    (df['data.info.accounting.profit.wfdProfit.extraServiceWarrantyProfit'] != df['data.info.profit.wfdProfit.extraServiceWarrantyProfit']), True, False)
+                                                                            
+
+  commission_df['Total WFD Income - Acct Modified'] = np.where(df['Accounting Box'] &
+      df['data.info.accounting.profit.wfdProfit.totalProfit'].notna() &
+    (df['data.info.accounting.profit.wfdProfit.totalProfit'] != df['data.info.profit.wfdProfit.totalProfit']), True, False)
+
+  commission_df['Total Reserve'] = np.where(df['Accounting Box'], df['acct_totalReserve'], df['blue_totalReserve'])
+  commission_df['WFD Reserve'] = np.where(df['Accounting Box'], df['acct_wfdReserve'], df['blue_wfdReserve'])
+
+  commission_df['Additional Reserve'] = np.where(df['Accounting Box'],df['data.info.accounting.profit.wfdProfit.extraReserveProfit'],
+                                                                           df['data.info.profit.wfdProfit.extraReserveProfit'])
+                                                                            
+
+  commission_df['GAP'] = np.where(df['Accounting Box'], df['data.info.accounting.profit.wfdProfit.extraGAPProfit'],
+                                                             df['data.info.profit.wfdProfit.extraGAPProfit'])
+                                                                            
+
+  commission_df['Warranty'] = np.where(df['Accounting Box'], df['data.info.accounting.profit.wfdProfit.extraServiceWarrantyProfit'],
+                                                                  df['data.info.profit.wfdProfit.extraServiceWarrantyProfit'])
+                                                                            
+
+  commission_df['Total WFD Income'] = np.where(df['Accounting Box'],  df['data.info.accounting.profit.wfdProfit.totalProfit'],
+                                                                           df['data.info.profit.wfdProfit.totalProfit'])
+                                                                           
+  commission_df['Commissionable Amount'] = np.where(df['Accounting Box'], df['data.info.accounting.profit.managerProfit.commissionableAmount'],
+                                                             df['data.info.profit.managerProfit.commissionableAmount'])
+       
+  commission_df['Commission'] = np.where(df['Accounting Box'], df['data.info.accounting.profit.managerProfit.commission'],
+                                                             df['data.info.profit.managerProfit.commission'])
+       
+
+  return commission_df
+
+def get_fm_commission_report(request):
+
   """Responds to any HTTP request.
   Args:
       request (flask.Request): HTTP request object.
@@ -454,8 +593,7 @@ def get_dealer_applicant_analysis_report(request):
   """
   # Get Environment Variables
   BUCKET = os.environ.get('REPORT_BUCKET','.')
-  REPORT_PATH = os.environ.get('REPORT_DIR','rep-reports')
-  DATA_PATH = os.environ.get('DATA_PATH','.')  # this will enable reading csv in local directory for local testing
+  REPORT_PATH = os.environ.get('REPORT_DIR','acct-reports')
   PROJECT_ID = os.environ.get('GCP_PROJECT',None)
   if not PROJECT_ID:
     GSPATH=''
@@ -463,11 +601,10 @@ def get_dealer_applicant_analysis_report(request):
   else:
     GSPATH='gs://'  
 
-  start_date = datetime(2021, 7, 1, 12)
-  end_date = datetime.utcnow()
+  start_date = None
+  end_date = None
+  fm_requested_id = None
 
-  dealer_id = None
-  rep_requested_id = None
   if request:
     request_json = request.get_json(silent=True)
     request_args = request.args
@@ -493,106 +630,159 @@ def get_dealer_applicant_analysis_report(request):
     except: 
       pass
 
-    if request_json and 'representativeId' in request_json:
-      rep_requested_id = request_json['representativeId']
-    elif request_args and 'representativeId' in request_args:
-      rep_requested_id = request_args['representativeId']
+    if request_json and 'fmId' in request_json:
+      fm_requested_id = request_json['fmId']
+    elif request_args and 'fmId' in request_args:
+      fm_requested_id = request_args['fmId']
 
-    if request_json and 'dealerId' in request_json:
-      dealer_id = request_json['dealerId']
-    elif request_args and 'dealerId' in request_args:
-      dealer_id = request_args['dealerId']
+  signed_deal_info = DealData(start_date,end_date,'signed',fm_requested_id)
+  signed_deal_df = signed_deal_info.df
+
+  if signed_deal_df.empty:
+    return 'No Data Available',404
+
+  s_date = signed_deal_info.start_date.strftime('%m/%d/%Y')
+  e_date = signed_deal_info.end_date.strftime('%m/%d/%Y')
+  timeframe = f'{s_date} - {e_date}'
+
+  signed_deal_df[['first_signed_at_date','Num Times Status Signed','Status Dates']] = signed_deal_df['data.info.statusHistory'].apply(DealData.first_date,status='signed',just_date=False).to_list()
+  signed_deal_df['first_delivered_at_date'] = signed_deal_df['data.info.statusHistory'].apply(DealData.first_date,status='delivered')
+  signed_deal_df['first_cancelled_at_date'] = signed_deal_df['data.info.statusHistory'].apply(DealData.first_date,status='canceled')
+
+  def make_applicant_name (row):
+    if row["data.applicant.data.info.middleName"] == None:
+      return f'{row["data.applicant.data.info.firstName"]} {row["data.applicant.data.info.lastName"]}'
+    else:
+      return f'{row["data.applicant.data.info.firstName"]} {row["data.applicant.data.info.middleName"]} {row["data.applicant.data.info.lastName"]}'
+
+
+  signed_deal_df['Customer'] = signed_deal_df.apply(make_applicant_name,axis=1)
+  print("Confused Deals")
+  print(signed_deal_df[(signed_deal_df['first_signed_at_date'].notna()) & (~(signed_deal_df['data.info.status'] == 'signed'))])
+  # if payroll date (to be set automatically by signed and sent to lender) is before cancelled date we need chargeback for info
+
+
+  xls = ExcelSpreadSheet()
+
+  default_sheet1 = [ 
+    {'name' : 'first_signed_at_date', 'col_name' : 'Signed at Date', 'col_width' : 12, 'col_format' : None , 'hidden' : False, 'total' : False, 'format' : xls.wrap_format},
+    {'name' : 'Num Times Status Signed', 'col_name' : 'Num Times Status Signed', 'col_width' : 12, 'col_format' : None , 'hidden' : False, 'total' : True, 'format' : xls.number_format},
+    {'name' : 'first_cancelled_at_date', 'col_name' : 'Cancelled Date', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format },
+    {'name' : 'data.info.dealDates.fundedAt', 'col_name' : 'Funded Date', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format },
+    {'name' : 'Finance Manager', 'col_name' : 'Finance Manager', 'col_width' : 12, 'col_format' : None , 'hidden' : False, 'total' : False, 'format' : xls.wrap_format},
+    {'name' : 'data.info.type', 'col_name' : 'Collateral Type', 'col_width' : 12, 'col_format' : None , 'hidden' : False, 'total' : False, 'format' : xls.wrap_format},
+    {'name' : 'Representative', 'col_name' : 'Representative', 'col_width' : 12, 'col_format' : None , 'hidden' : False, 'total' : False, 'format' : xls.wrap_format},
+    {'name' : 'data.info.refNumber', 'col_name' : 'Ref Number', 'col_width' : 15, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format },
+    {'name' : 'data.dealership.data.info.name', 'col_name' : 'Dealer', 'col_width' : 20, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format },
+    {'name' : 'Customer', 'col_name' : 'Customer', 'col_width' : 20, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format},
+    {'name' : 'data.info.vehicle.VIN', 'col_name' : 'VIN', 'col_width' : 25, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format},
+    {'name' : 'Vehicle', 'col_name' : 'Vehicle', 'col_width' : 30, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format},
+    {'name' : 'data.lender.data.info.name', 'col_name' : 'Lender', 'col_width'  : 30, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format },
+    {'name' : 'data.info.payment.dealTotal', 'col_name' : 'Amount Financed', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.currency_format }
+  ]
+
+  conditional_fields = [
+    {'name' : 'Accounting Box', 'col_name' : 'Accounting Box', 'col_width' : 10, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.wrap_format },
+    {'name' : 'Additional Reserve - Acct Modified', 'col_name' : 'Additional Reserve - Acct Modified', 'col_width' : 10, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.wrap_format },
+    {'name' : 'GAP - Acct Modified', 'col_name' : 'GAP - Acct Modified', 'col_width' : 10, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.wrap_format },
+    {'name' : 'Warranty - Acct Modified', 'col_name' : 'Warranty - Acct Modified', 'col_width' : 10, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.wrap_format },   
+    {'name' : 'Total WFD Income - Acct Modified', 'col_name' : 'Total WFD Income - Acct Modified', 'col_width' : 10, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.wrap_format },
+    {'name' : 'Total Reserve', 'col_name' : 'Total Reserve', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.currency_format },
+    {'name' : 'WFD Reserve', 'col_name' : 'WFD Reserve', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.currency_format },
+    {'name' : 'Additonal Reserve', 'col_name' : 'Additonal Reserve', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.currency_format },
+    {'name' : 'GAP', 'col_name' : 'GAP', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.currency_format },
+    {'name' : 'Warranty', 'col_name' : 'Warranty', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.currency_format },
+    {'name' : 'Total WFD Income', 'col_name' : 'Total WFD Income', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.currency_format },
+    {'name' : 'Commissionable Amount', 'col_name' : 'Commissionable Amount', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.currency_format },
+    {'name' : 'Commissionable', 'col_name' : 'Commissionable', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.currency_format }
+
+  ]
+  #conditional_fields = ['Total Reserve', 'WFD Reserve','Additional Reserve','GAP', 'Warranty','Total WFD Income']
+
+  default_sheet2 = [ 
+    {'name' : 'first_signed_at_date', 'col_name' : 'Signed at Date', 'col_width' : 12, 'col_format' : None , 'hidden' : False, 'total' : False, 'format' : xls.wrap_format},
+    {'name' : 'first_delivered_at_date', 'col_name' : 'Delivered Date', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format },
+    {'name' : 'Num Times Status Delivered', 'col_name' : 'Num Times Status Delivered', 'col_width' : 12, 'col_format' : None , 'hidden' : False, 'total' : True, 'format' : xls.number_format}, 
+    {'name' : 'first_cancelled_at_date', 'col_name' : 'Cancelled Date', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format },
+    {'name' : 'data.info.dealDates.fundedAt', 'col_name' : 'Funded Date', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format },
+    {'name' : 'Finance Manager', 'col_name' : 'Finance Manager', 'col_width' : 12, 'col_format' : None , 'hidden' : False, 'total' : False, 'format' : xls.wrap_format},
+    {'name' : 'data.info.type', 'col_name' : 'Collateral Type', 'col_width' : 12, 'col_format' : None , 'hidden' : False, 'total' : False, 'format' : xls.wrap_format},
+    {'name' : 'Representative', 'col_name' : 'Representative', 'col_width' : 12, 'col_format' : None , 'hidden' : False, 'total' : False, 'format' : xls.wrap_format},
+    {'name' : 'data.info.refNumber', 'col_name' : 'Ref Number', 'col_width' : 15, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format },
+    {'name' : 'data.dealership.data.info.name', 'col_name' : 'Dealer', 'col_width' : 20, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format },
+    {'name' : 'Customer', 'col_name' : 'Customer', 'col_width' : 20, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format },
+    {'name' : 'data.info.vehicle.VIN', 'col_name' : 'VIN', 'col_width' : 20, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format },
+    {'name' : 'Vehicle', 'col_name' : 'Vehicle', 'col_width' : 25, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format},
+    {'name' : 'data.lender.data.info.name', 'col_name' : 'Lender', 'col_width'  : 25, 'col_format' : None, 'hidden' : False, 'total' : False, 'format' : xls.wrap_format },
+    {'name' : 'data.info.payment.dealTotal', 'col_name' : 'Amount Financed', 'col_width' : 12, 'col_format' : None, 'hidden' : False, 'total' : True, 'format' : xls.currency_format },
+  ]
+
+  #signed_deal_df['Accounting Box'] = signed_deal_df['data.info.dealDates.fundedAt'].notna()
+  # We need to handle those lenders that pay the dealer directly, currently only Royal Credit Union
+  signed_deal_df['Accounting Box'] = np.where((signed_deal_df['data.info.dealDates.fundedAt'].notna() & 
+      (signed_deal_df['data.lender.data.info.name'] != 'Royal Credit Union')),  True, False)
+
+  signed_deal_df['data.info.dealDates.fundedAt'] = pd.to_datetime(signed_deal_df['data.info.dealDates.fundedAt']).dt.date
+
+  commission_df =  create_commission_df(signed_deal_df)
+
+  report_fields =  [c['name'] for c in default_sheet1]
+  report_df = signed_deal_df[report_fields].copy()
+
+  rename_dict = {c['name'] : c['col_name'] for c in default_sheet1}
+  report_df = report_df.rename(columns = rename_dict)
+  report_df = report_df.join(commission_df)
+  report_df = report_df[report_df['Signed at Date'].notna()]
+  sheet1 = default_sheet1 + conditional_fields
+
+  xls.write_df_to_excel(report_df,"Signed Deals",row=0,text=f'Deal Information for deals signed  in timeframe {timeframe}',autoFilter=True,format_columns=sheet1)
   
-
-  applicant_info = ApplicantInfo(GSPATH,BUCKET,DATA_PATH,PROJECT_ID)
-  applicant_df = applicant_info.feature_engineer_address()
-
-  dealer_info = DealData(rep_requested_id,dealer_id,start_date,end_date,GSPATH,BUCKET,DATA_PATH,PROJECT_ID)
-  dealer_info.feature_engineer_dealer()
-  dealer_info.feature_engineer()
-
-  dealer_df = dealer_info.get_df()
-
-  dealer_df = dealer_df.merge(applicant_df[['_id','age','AgeGroup','location','lat','long','data.info.maritalStatus_Married',
-                                            'data.info.maritalStatus_Not married']],left_on='data.applicant._id',right_on='_id',how='left')
+  sheet3_df = report_df.copy()
 
 
-  geocoder = GeoCode()
-  dealers_map = folium.Map(location=[43.9097, -91.2428],tiles='cartodbpositron',zoom_start=6)
-  tooltip = 'Web Finance Direct'
-  popup_string = "<i>Web Finance Direct<br>Click For More Info</i>"
-  folium.Marker([43.9097, -91.2428], popup=popup_string, tooltip=tooltip).add_to(dealers_map)
-  fg = folium.FeatureGroup('WFD Dealers')
-  if not rep_requested_id:
-    dealers_map.add_child(fg)
-    
-  marker_colors = [ 'darkpurple', 'blue', 'purple', 'orange','darkblue', 'cadetblue','lightblue','beige', 
-                    'pink', 'lightgreen', 'gray', 'black','lightgray','green','darkred','lightred' ,'darkgreen','red','white']
+  delivered_deal_info = DealData(start_date,end_date,'delivered',fm_requested_id)
+  delivered_deal_df = delivered_deal_info.df
 
+  if not delivered_deal_df.empty:
+    #delivered_deal_df['Accounting Box'] = delivered_deal_df['data.info.dealDates.fundedAt'].notna()
+    delivered_deal_df['Accounting Box'] = np.where((delivered_deal_df['data.info.dealDates.fundedAt'].notna() & 
+      (delivered_deal_df['data.lender.data.info.name'] != 'Royal Credit Union')),  True, False)
+    delivered_deal_df['data.info.dealDates.fundedAt'] = pd.to_datetime(delivered_deal_df['data.info.dealDates.fundedAt']).dt.date
+    delivered_deal_df['first_signed_at_date'] = delivered_deal_df['data.info.statusHistory'].apply(DealData.first_date,status='signed')
+    delivered_deal_df[['first_delivered_at_date','Num Times Status Delivered','Status Dates']] = delivered_deal_df['data.info.statusHistory'].apply(DealData.first_date,status='delivered',just_date=False).to_list()
+    delivered_deal_df['first_cancelled_at_date'] = delivered_deal_df['data.info.statusHistory'].apply(DealData.first_date,status='canceled')
+    delivered_deal_df['Customer'] = delivered_deal_df.apply(make_applicant_name,axis=1)
+      
+    commission_d_df =  create_commission_df(delivered_deal_df)
 
+    report_fields =  [c['name'] for c in default_sheet2]
+    report_df = delivered_deal_df[report_fields].copy()
 
-  macro = MacroElement()
-  macro._template = Template(template)
+    rename_dict = {c['name'] : c['col_name'] for c in default_sheet2}
+    report_df = report_df.rename(columns = rename_dict)
+    report_df = report_df.join(commission_d_df)
+    #report_df = report_df[report_df['Delivered Date'].notna()]
+    sheet2 = default_sheet2 + conditional_fields
 
-  dealers_map.get_root().add_child(macro)
-  iframe = click_iframe(dealer_df)
-  popup_string = folium.Popup(iframe, max_width=2650)
-  folium.Marker([43.9097, -91.2428],icon=folium.Icon(color='red'),popup=popup_string, tooltip=tooltip,color='red').add_to(dealers_map)
+  # report_fields =  [c['name'] for c in default_sheet2]
+  # report_df = deal_df[report_fields].copy()
 
+  # rename_dict = {c['name'] : c['col_name'] for c in default_sheet2}
+  # report_df = report_df.rename(columns = rename_dict)
 
-  rep_list = dealer_df['data.dealership.data.representativeId'].unique()
-  for i,rep in enumerate(rep_list):
-    r = RepEntity(rep)
-    rep_name = r.rep_name()
-    rep_gp = folium.FeatureGroup(f"{rep_name}'s Dealers and Deals",show=False)
-    rep_df = dealer_df[dealer_df['data.dealership.data.representativeId'] == rep]
+  # report_df = report_df.join(commission_df)
 
-    dealers_map.add_child(rep_gp)
-    for dealer_name in sorted(rep_df['data.dealership.data.info.name'].unique()):
-      d_df = rep_df[rep_df['data.dealership.data.info.name'] == dealer_name]
-      try:
-        dealer_addr_location = geocoder.geocode_address(d_df['geocode_address'].values[0])
-        dealer_rep_id = d_df['data.dealership.data.representativeId'].values[0]
-        lat = dealer_addr_location[0]['geometry']['location']['lat']
-        long = dealer_addr_location[0]['geometry']['location']['lng']
-        tooltip = f'{dealer_name}'
-        popup_string = f'"<i>{dealer_name} </i>"'
+  # sheet2 = default_sheet2 + conditional_fields
 
-        d_df=d_df[d_df['lat'].notna()]
-        d_df=d_df.drop_duplicates(subset='data.info.refNumber') #doesn't matter which one we keep
+    xls.write_df_to_excel(report_df,"Delivered Deals",row=0,text=f'Deal Information for deals delivered in timeframe {timeframe}',autoFilter=True,
+                          format_columns=sheet2)  
+  cutoff_date = end_date  +  timedelta(days=10)
+  sheet3_df = sheet3_df[sheet3_df['Funded Date'] > cutoff_date.date()]
+  xls.write_df_to_excel(sheet3_df,"Funded after 10th",row=0,text=f'Deal Information for deals signed  in timeframe {timeframe} but funded after 10th of the following month',autoFilter=True,format_columns=sheet1)
 
-        dealer_iframe = click_iframe(d_df)
-        dealer_popup = folium.Popup(dealer_iframe, max_width=2650)
+  xls.close()
 
-        print(f'Calling folium.Marker for {dealer_name}')
-        if rep_requested_id:
-          dealer_gp = folium.FeatureGroup(f"{dealer_name}'s Deals",show=False)
-          folium.Marker([lat, long], popup=popup_string,icon=folium.Icon(color=marker_colors[rep_list.tolist().index(dealer_rep_id)]), tooltip=tooltip).add_to(dealer_gp)
-        else:
-          folium.Marker([lat, long], popup=popup_string,icon=folium.Icon(color=marker_colors[rep_list.tolist().index(dealer_rep_id)]), tooltip=tooltip).add_to(fg)
-
-        dealer_sub_gp = plugins.FeatureGroupSubGroup(rep_gp,dealer_name,show=False) 
-
-        folium.Marker([lat, long], popup=dealer_popup,icon=folium.Icon(color=marker_colors[rep_list.tolist().index(dealer_rep_id)]), tooltip=tooltip).add_to(rep_gp)
-
-        if rep_requested_id:
-          dealers_map.add_child(dealer_gp)
-          d_df.apply(mark_it,group=dealer_gp,axis=1)
-
-        rep_gp.add_child(dealer_sub_gp)
-        d_df.apply(mark_it,group=dealer_sub_gp,axis=1)
-      except:
-        print(f'Dealer {dealer_name} no')
-        continue
-
-
-
-  folium.LayerControl().add_to(dealers_map)
-  output_file = "/tmp/map.html"
-
-  dealers_map.save(output_file)
-  urls = dealer_info.store_data(output_file)
-  #status = webbrowser.open(f'file://{output_file}', new=2)  # open in new tab
+  urls = xls.store_xls( PROJECT_ID,BUCKET,REPORT_PATH)
   return  urls
 if __name__ == "__main__":
-  get_dealer_applicant_analysis_report(None)
+  get_fm_commission_report(None)

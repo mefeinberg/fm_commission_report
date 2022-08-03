@@ -19,18 +19,18 @@ steps:
   - gcloud
   - functions
   - deploy
-  - get_dealer_applicant_analysis_report
+  - get_fm_commission_report
   - --region=us-central1
   - --source=.
   - --trigger-http
   - --runtime=python37
-  - --timeout=400
-  - --memory=2GB
+  - --timeout=60
+  - --memory=256MB
   - --vpc-connector=wfd-serverlessvpc-99
   #- --vpc-connector=mongo-connector
   - --egress-settings=all
   #- --service-account=fninvoker@webfinancedirect-dev.iam.gserviceaccount.com
   - --set-secrets=/etc/secrets/primary/latest=fninvoker-key:latest
-  - --set-env-vars=REPORT_BUCKET=wfd-reporting-bkt-99-prd,REPORT_DIR=rep-reports,DATA_PATH=merged_data
+  - --set-env-vars=REPORT_BUCKET=wfd-reporting-bkt-99-prd,REPORT_DIR=acct-reports
   # - --set-secrets=/etc/secrets/primary/latest=fninvoker-key-dev:latest
   # - --set-env-vars=REPORT_BUCKET=wfd-reporting-01,REP_REPORT_DIR=lender-reports
